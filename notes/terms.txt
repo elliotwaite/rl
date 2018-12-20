@@ -1,0 +1,112 @@
+TERMS
+  V / Q Values
+    V - State-value function. The estimated total future discounted reward
+        we'll receive if we start at the given state and follow the given
+        policy.
+    Q - Action-value function. The estimated total future discounted reward
+        we'll receive if we start at the given state, take the given action,
+        then follow the given policy.
+  Deterministic / Stochastic Policy
+    Deterministic - The policy returns a single action.
+    Stochastic - The policy returns a probability distribution over actions.
+                 The chosen action is sampled from the distribution.
+                 Is the optimal strategy (Nash equilibrium) in some cases,
+                 such as to be non-predictable to an opponent, or to ensure
+                 more exploration.
+  Model-Based / Model-Free Algorithms
+    Model-Based - Requires a model of the environment. (DP)
+    Model-Free - Doesn't require a model of the environment. Samples
+                 experience. (MC, TD)
+  Planning / RL
+    Planning - We have a model of the environment. We compute with the model
+               and improve the policy without interacting with the actual
+               environment.
+    RL - We don't have a model of the environment. We interact with the
+         environment to improve our policy.
+  Prediction / Control
+    Prediction - Evaluate v or q given a policy.
+    Control - Find the best policy. Sometimes uses the v or q values.
+              Needs to account for exploitation vs exploration.
+  Policy Iteration / Value Iteration
+    Policy Iteration - Model-based version: Start with any pi. Find v or q
+                       of pi using DP, MC, or TD, then update pi to act
+                       greedily with respect to v or q (or e-greedily if
+                       using a sampling algorithm (MC or TD) to encourage
+                       exploration) Converges to pi*.
+                       Model-free version: You have to use q since calculating
+                       the max action using v requires knowing the state
+                       transition matrix. And since you'll be using sampling
+                       algorithm, you'll want to act e-greedily respect to q.
+    Value Iteration - Model-based. Start with any v. Find v* using DP
+                      (v = max of next states for all actions). Then act
+                      greedily with respect to v* to get pi*. You can also
+                      find q* then act greedily with respect to q*, but this
+                      take O(a^2 * s^2) time as opposed to O(a * s^2) time
+                      where a is number of action and s is number of
+                      states.
+  DP / MC / TD
+    DP - Calculates v, q, or pi by iteratively sweeping over all states (as
+         opposed to sampling states like MC and TD) and takes advantage of the
+         bellman equation.
+    MC - Only uses final return after a full episode to update v, q, or pi.
+         Updates v or q toward the average return.
+    TD - Bootstraps using estimated returns after partial episodes to update
+         v, q, or pi allowing the true values to propogate more quickly.
+         May update policy after 1 step or wait till end of full episode or
+         batch of episodes to avoid divergence.
+         TD (0) - Only look one step into the future.
+         TD (n-step) - Look n-steps into the future. TD (infinite-step) is MC.
+         TD (lambda) - Average over all n-steps using an exponentially decaying
+                       weighted average.
+         Sarsa - (0, n-step, lambda) A specific variant of TD. Predicts q
+                 values using on-policy sampled q values and received rewards.
+                 This is different than Q-learning in that it uses on policy q
+                 values instead of the next states max q value.
+         Q-learning - (0, n-step, lambda) An off-policy version of TD where we
+                      update our sampled q value towards the immediate return
+                      plus the gamma discounted max q value of the next state.
+                      Using the max q instead of the next sampled q value is
+                      what makes it off-policy and different from Sarsa.
+         DQN - A specific variant of Q-learning that uses a neural network
+               function approximator.
+  On-Line / Off-Line Learning (somewhat overloaded terms)
+    On-Line - Updates v or q mid episode, usually the policy isn't updated
+              till after the episode or a batch of episodes. (TD)
+    Off-Line - Updates v or q only after full episode. (MC)
+    (Can also mean the difference between training on a single episode vs a
+     batch of episodes.)
+  On-Policy / Off-Policy Learning
+    On-Policy - Evaluate the policy we are using to choose actions.
+    Off-Policy - Evaluate a different policy than the policy we are using to
+                 choose actions. Can follow an exploratory policy and evaluate
+                 the optimal policy. Can learn from human demonstration. Can
+                 learn from data from a old policies. Can learn about multiple
+                 policies, any other policy, while following one policy.
+    Off-policy MC can be done using importance sampling, but is a bad idea
+    because the difference between the behavior policy's action probabilities
+    and the target policy's action probabilities compounds over many steps and
+    causes the importance weighted returns to be very high variance. So you
+    should use TD (TD(0) preferably) for off-policy importance sampling (v or
+    q values, or even better, don't use importance sampling, just use
+    Q-learning which gets the next step's q value using the target policy
+    (the max q) instead of using the importance-sampling weighted q value of
+    our behavior policy.
+  Lookup Table / Function Approximator
+    Lookup Table - Store v or q values for each state. (Using a table)
+    Function Approximator - Use a function approximator to approximate v, q, or
+                            the policy function for the given state.
+                            Allows us to scale to more state. Can infer about
+                            states we've never seen. (Neural network, etc.)
+  Value-Based / Policy-Based / Actor Critic
+    Value-Based - We learn the value function (v or q) and then the policy acts
+                  greedily (or e-greedily) with respect to these values.
+    Policy-Based - We learn the policy directly. No value function.
+                   Better convergence properties than value-based learning (no
+                   big swings in which actions are chosen, smoother changes).
+                   Can also be used with continuous or high-dimensional
+                   action spaces (don't need to calculate the max q).
+                   Better for learning stochastic policies rather than just use
+                   max q.
+    Actor-Critic - Same as policy-based, except instead of sampling the rewards
+                   used in our policy gradient calculations (MC), we use a
+                   value function to estimate the rewards (TD).
