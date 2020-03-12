@@ -6,14 +6,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import agents
+import algos
 
 random.seed(123)
 torch.manual_seed(123)
 np.random.seed(123)
 
 
-class DQN1StepAgent(agents.BaseAgent):
+class DQN1StepAgent(algos.BaseAgent):
   def __init__(self,
                fc1_size=64,
                fc2_size=64,
@@ -59,8 +59,8 @@ class DQN1StepAgent(agents.BaseAgent):
       action = int(random.random() * self.num_actions)
     else:
       # Act greedily.
-      self.model.eval()
       inputs = torch.from_numpy(state).float().unsqueeze(0)
+      self.model.eval()
       with torch.no_grad():
         action = self.model(inputs).argmax().item()
 

@@ -1,7 +1,7 @@
-import agents
+from algos.base_agent import BaseAgent
 
 
-class RandomAgent(agents.BaseAgent):
+class RandomAgent(BaseAgent):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
 

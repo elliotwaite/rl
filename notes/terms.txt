@@ -51,7 +51,7 @@ TERMS
     MC - Only uses final return after a full episode to update v, q, or pi.
          Updates v or q toward the average return.
     TD - Bootstraps using estimated returns after partial episodes to update
-         v, q, or pi allowing the true values to propogate more quickly.
+         v, q, or pi allowing the true values to propagate more quickly.
          May update policy after 1 step or wait till end of full episode or
          batch of episodes to avoid divergence.
          TD (0) - Only look one step into the future.

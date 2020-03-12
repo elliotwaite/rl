@@ -18,7 +18,7 @@ class MountainCarDQNMonitor:
     self.ax.plot([0.5, 0.5], self.ax.get_ylim(), color='#cccc00')
     self.state_point_2d, = self.ax.plot(-0.5, 0, marker='o', color='black')
 
-    # Make the pressing the close button on the plot exit the python script.
+    # Make pressing the close button on the plot exit the python script.
     self.fig.canvas.mpl_connect('close_event', exit)
 
     plt.ion()

@@ -5,7 +5,7 @@ Target Network (prevents chasing own tail) - soft updates, frozen model.
 Huber loss (stabilizes training by decreasing loss for large errors).
 Adam or RMSProp instead of SGD (empirically helps update the Q network to get better experience data).
 Exploration Rate Annealing (explore a lot at the beginning) - Start epsilon at 1, slowly reduce to 0.1 or 0.05.
-Set Gamma to see enough future reward to solve the relevant sub problems of the environment.
+Set Gamma to see enough future reward to solve the relevant subproblems of the environment.
 Double DQN (reduces DQN overestimation bias) - When calculating the target values, select the max actions with the live network, but get the values of those actions with the target network.
 Prioritized Experience Replay (faster training) - Sample experience replay data relative to the TD error.
 Dueling DQN (a network that learns more easily) - Split network to predict the average value, then the advantage, and sum them together.
