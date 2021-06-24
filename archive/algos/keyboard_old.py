@@ -1,7 +1,7 @@
-import agents
+import algos
 
 
-class KeyboardAgent(agents.BaseAgent):
+class KeyboardAgent(algos.BaseAgent):
   def __init__(self,
                default_action=0,
                key_to_action_map=None,
@@ -10,13 +10,13 @@ class KeyboardAgent(agents.BaseAgent):
     self.action = self.default_action = default_action
     self.key_to_action_map = key_to_action_map
 
-    self.env.unwrapped.viewer.window.on_key_press = self.key_press
-    self.env.unwrapped.viewer.window.on_key_release = self.key_release
+    self.env.unwrapped.viewer.window.on_key_press = self.on_key_press
+    self.env.unwrapped.viewer.window.on_key_release = self.on_key_release
 
   def act(self, state):
     return self.action
 
-  def key_press(self, key_code, mod):
+  def on_key_press(self, key_code, mod):
     key = int(key_code - ord('0'))
     if self.key_to_action_map is not None:
       if key in self.key_to_action_map:
@@ -24,7 +24,7 @@ class KeyboardAgent(agents.BaseAgent):
     elif 0 <= key <= self.num_actions:
       self.action = key
 
-  def key_release(self, key_code, mod):
+  def on_key_release(self, key_code, mod):
     key = int(key_code - ord('0'))
     if self.key_to_action_map is not None:
       if (key in self.key_to_action_map and

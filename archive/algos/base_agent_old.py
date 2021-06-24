@@ -4,6 +4,7 @@ import numpy as np
 import time
 
 NEW_LINE_FREQUENCY = 100
+VIEWER_WINDOW_X_POS = 1204
 
 
 class BaseAgent:
@@ -20,7 +21,7 @@ class BaseAgent:
     self.env = gym.make(env_id)
     self.env.render()
     self.env.env.viewer.window.set_location(
-        1204, self.env.env.viewer.window.get_location()[1])
+        VIEWER_WINDOW_X_POS, self.env.env.viewer.window.get_location()[1])
     self.env.render()
     self.env.env.viewer.window.on_close = exit
     self.state_size = self.env.observation_space.shape[0]
@@ -61,26 +62,26 @@ class BaseAgent:
 
   def run_episode(self, train=False, render=False, print_steps=False):
     score = 0
-    state = self.env.reset()
+    obs = self.env.reset()
     if render:
       self.env.render()
     for step in range(self.max_episode_steps):
-      action = self.act(state)
-      next_state, reward, done, _ = self.env.step(action)
+      action = self.act(obs)
+      next_obs, rew, done, _ = self.env.step(action)
       if train:
-        self.step(state, action, reward, next_state, done)
+        self.step(obs, action, rew, next_obs, done)
       if self.monitor is not None:
-        self.monitor.update(self, state, action, reward, next_state, done)
-      state = next_state
-      score += reward
+        self.monitor.update(self, obs, action, rew, next_obs, done)
+      obs = next_obs
+      score += rew
       if render:
         self.env.render()
         if print_steps:
-          state_str = ', '.join(f'{x: .5f}' for x in state)
+          state_str = ', '.join(f'{x: .5f}' for x in obs)
           print(f'Step: {step + 1:>3}   '
                 f'Action: {action}   '
                 f'State: {state_str}   '
-                f'Reward: {reward: >4g}   '
+                f'Reward: {rew: >4g}   '
                 f'Score: {score: >4g}')
       if done:
         break

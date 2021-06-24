@@ -1,3 +1,4 @@
 .git
 .idea
+/bullet_tests/data
 /test.py

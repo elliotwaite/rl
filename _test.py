@@ -37,4 +37,4 @@ from mpi4py import MPI
 # a.discard(2)
 # print(a)
 
-print((1, 2) + (3, 4))
+print(list(range(10 - 1,  -1, -1)))

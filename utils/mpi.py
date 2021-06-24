@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 
-def run_parallel_procs(num):
+def run_parallel_procs(num=None):
   """Reruns the current script in multiple processes linked by MPI.
 
   Also, terminates the current process.
@@ -178,7 +178,8 @@ def reduced_min_across_procs(x):
 def reduced_mean_and_std_across_procs(x):
   """Returns the reduced mean and standard deviation across MPI processes."""
   x = np.asarray(x, dtype=np.float32)
-  global_sum, global_n = sum_across_procs([np.sum(x), len(x)])
+
+  global_sum, global_n = sum_across_procs(np.array([np.sum(x), len(x)]))
   mean = global_sum / global_n
 
   global_sum_sq = sum_across_procs(np.sum((x - mean) ** 2))
@@ -192,7 +193,7 @@ def avg_grads_across_procs(module):
   if num_procs() == 1:
     return
   for p in module.parameters():
-    p.grad.numpy()[:] = avg_across_procs(p.grad)
+    p.grad.numpy()[:] = avg_across_procs(p.grad.numpy())
 
 
 def sync_params_across_procs(module):

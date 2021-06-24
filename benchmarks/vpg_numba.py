@@ -1,13 +1,28 @@
 """Most of this code is from OpenAI's Spinning Up in Deep RL:
 https://github.com/openai/spinningup/tree/master/spinup/algos/pytorch/vpg
+
+numba:
+  1 procs (5 epochs):
+    306.2319779396057
+  6 procs (5 epochs):
+    38.31909203529358
+
+python:
+  1 procs (5 epochs):
+    16.213958978652954
+  6 procs (5 epochs):
+    5.503521919250488
+  6 procs (5 epochs, with numba discounted_cumsum):
+    5.162061929702759
 """
 import argparse
 import os
 import time
 
 import gym
-import numba
+from numba import njit, jitclass, uint32, float32, objmode, jit
 import numpy as np
+import scipy.signal
 import torch
 import torch.nn as nn
 import torch.distributions as distributions
@@ -18,67 +33,88 @@ from utils import mpi
 
 INITIAL_LOG_STD = -0.5
 
+OBS_SHAPE = (8,)
+ACT_SHAPE = ()
+AGENT = None
 
-@numba.njit(cache=True)
-def discounted_cumsum(x, discount):
-  y = np.empty_like(x)
+
+@njit('(float32[:], float32[:], float32, int64, int64)')
+def discounted_cumsum_out(x, y, discount, start, end):
   temp = 0.0
-  for i in range(len(x) - 1, -1, -1):
+  for i in range(end - 1, start - 1, -1):
     temp *= discount
     temp += x[i]
     y[i] = temp
-  return y
 
 
-class Buffer:
+@jitclass([
+    ('buffer_size', uint32),
+    ('gam', float32),
+    ('lam', float32),
+    ('obs_buf', float32[:, :]),
+    ('act_buf', float32[:]),
+    ('rew_buf', float32[:]),
+    ('logp_buf', float32[:]),
+    ('val_buf', float32[:]),
+    ('adv_buf', float32[:]),
+    ('ret_buf', float32[:]),
+    ('ptr', uint32),
+    ('episode_start_ptr', uint32),
+])
+class ReplayBuffer:
   def __init__(self, buffer_size, obs_shape, act_shape, gam=0.99, lam=0.95):
     self.buffer_size = buffer_size
     self.gam = gam
     self.lam = lam
-    self.obs_buf = np.zeros((buffer_size, *obs_shape), dtype=np.float32)
-    self.act_buf = np.zeros((buffer_size, *act_shape), dtype=np.float32)
-    self.rew_buf = np.zeros(buffer_size, dtype=np.float32)
-    self.logp_buf = np.zeros(buffer_size, dtype=np.float32)
-    self.val_buf = np.zeros(buffer_size, dtype=np.float32)
-    self.adv_buf = np.zeros(buffer_size, dtype=np.float32)
-    self.ret_buf = np.zeros(buffer_size, dtype=np.float32)
-    self.cur_i = 0
-    self.episode_start_i = 0
+    self.obs_buf = np.zeros((buffer_size + 1, 8), dtype=np.float32)
+    self.act_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.rew_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.logp_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.val_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.adv_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.ret_buf = np.zeros(buffer_size + 1, dtype=np.float32)
+    self.ptr = 0
+    self.episode_start_ptr = 0
 
   def add(self, obs, act, rew, logp, val):
-    assert self.cur_i < self.buffer_size  # Assert that the buffer is not full.
-    self.obs_buf[self.cur_i] = obs
-    self.act_buf[self.cur_i] = act
-    self.rew_buf[self.cur_i] = rew
-    self.logp_buf[self.cur_i] = logp
-    self.val_buf[self.cur_i] = val
-    self.cur_i += 1
+    self.obs_buf[self.ptr] = obs
+    self.act_buf[self.ptr] = act
+    self.rew_buf[self.ptr] = rew
+    self.logp_buf[self.ptr] = logp
+    self.val_buf[self.ptr] = val
+    self.ptr += 1
 
-  def end_episode(self, last_val=0):
-    episode_slice = slice(self.episode_start_i, self.cur_i)
-    rews = np.append(self.rew_buf[episode_slice], last_val)
-    vals = np.append(self.val_buf[episode_slice], last_val)
+  def end_episode(self, last_val=0.0):
+    self.rew_buf[self.ptr] = last_val
+    self.val_buf[self.ptr] = last_val
+
+    episode_len = self.ptr - self.episode_start_ptr
+
+    # episode_slice = slice(self.episode_start_ptr, self.ptr)
+    # rews = np.append(self.rew_buf[episode_slice], last_val)
+    # vals = np.append(self.val_buf[episode_slice], last_val)
 
     # Compute the GAE-Lambda advantage values.
-    deltas = rews[:-1] + self.gam * vals[1:] - vals[:-1]
-    self.adv_buf[episode_slice] = discounted_cumsum(deltas, self.gam * self.lam)
+    for i in range(episode_len):
+      self.adv_buf[i] = self.rew_buf[i] + self.gam * self.val_buf[i + 1] - self.val_buf[i]
+    discounted_cumsum_out(self.adv_buf, self.adv_buf, self.gam * self.lam, self.episode_start_ptr, self.ptr)
 
     # Compute the rewards-to-go (for targets for the value function).
-    self.ret_buf[episode_slice] = discounted_cumsum(rews, self.gam)[:-1]
+    discounted_cumsum_out(self.rew_buf, self.ret_buf, self.gam, self.episode_start_ptr, self.ptr)
 
-    self.episode_start_i = self.cur_i
+    self.episode_start_ptr = self.ptr
 
   def get(self):
-    assert self.cur_i == self.buffer_size  # Assert that the buffer is full.
-    self.cur_i = 0
-    self.episode_start_i = 0
+    assert self.ptr == self.buffer_size  # Assert that the buffer is full.
+    self.ptr = 0
+    self.episode_start_ptr = 0
 
     # Normalize our advantage values.
-    adv_mean, adv_std = mpi.reduced_mean_and_std_across_procs(self.adv_buf)
+    with objmode(adv_mean='float32', adv_std='float32'):
+      adv_mean, adv_std = mpi.reduced_mean_and_std_across_procs(self.adv_buf)
     self.adv_buf = (self.adv_buf - adv_mean) / adv_std
 
-    return (torch.as_tensor(x, dtype=torch.float32) for x in
-            (self.obs_buf, self.act_buf, self.logp_buf, self.adv_buf, self.ret_buf))
+    return self.obs_buf[:-1], self.act_buf[:-1], self.logp_buf[:-1], self.adv_buf[:-1], self.ret_buf[:-1]
 
 
 def mlp(sizes, activation_fn):
@@ -171,9 +207,10 @@ class MLPActorCritic(nn.Module):
 
 
 class Agent:
-  def __init__(self, env, pi_lr=.0004, v_lr=.001):
+  def __init__(self, env, pi_lr=.0004, v_lr=.001, v_steps_per_pi_step=1):
     super().__init__()
     self.env = env
+    self.v_steps_per_pi_step = v_steps_per_pi_step
 
     self.obs_shape = env.observation_space.shape
     self.act_shape = env.action_space.shape
@@ -211,8 +248,9 @@ class Agent:
   def get_v_loss(self, obs, ret):
     return ((self.ac.v(obs) - ret) ** 2).mean()
 
-  def update(self, v_steps_per_update):
-    obs, act, logp, adv, ret = self.buffer.get()
+  def update(self, buffer_data):
+    obs, act, logp, adv, ret = (
+        torch.as_tensor(x, dtype=torch.float32) for x in buffer_data)
 
     # Get loss and info values before the update.
     old_pi_loss, old_pi_info = self.get_pi_loss(obs, act, adv, logp)
@@ -227,7 +265,7 @@ class Agent:
     self.pi_optimizer.step()
 
     # Train our value network.
-    for _ in range(v_steps_per_update):
+    for _ in range(self.v_steps_per_pi_step):
       v_loss = self.get_v_loss(obs, ret)
       self.v_optimizer.zero_grad()
       v_loss.backward()
@@ -274,68 +312,64 @@ class Agent:
     self.v_optimizer.load_state_dict(checkpoint['v_optimizer'])
     self.epoch = checkpoint['epoch']
 
-  def train(self, epochs, steps_per_epoch, max_ep_len, save_freq, gam, lam, v_steps_per_update):
-    local_steps_per_epoch = int(steps_per_epoch / mpi.num_procs())
-    self.buffer = Buffer(local_steps_per_epoch, self.obs_shape, self.act_shape, gam, lam)
-    obs = self.env.reset()
-    ep_step = 0
-    ep_ret = 0
+
+@njit((uint32, uint32, uint32, uint32, float32, float32))
+def train(epochs, steps_per_epoch, max_ep_len, save_freq, gam, lam):
+  buffer = ReplayBuffer(steps_per_epoch, OBS_SHAPE, ACT_SHAPE, gam, lam)
+
+  with objmode(obs='float32[:]'):
+    obs = np.array(AGENT.env.reset(), np.float32)
+    # print(obs)
+    # print(obs.dtype)
+    # print(obs.shape)
+    # exit()
+
+  ep_step = 0
+  ep_ret = 0
+  total_ep_ret = 0
+  total_eps = 0
+
+  for epoch in range(epochs):
+    for epoch_step in range(steps_per_epoch):
+      with objmode(act='float32', logp='float32', val='float32', next_obs='float32[:]', rew='float32', done='uint8'):
+        act, logp, val = AGENT.ac.step(obs)
+        next_obs, rew, done, _ = AGENT.env.step(act)
+        val = np.float32(val)
+
+      buffer.add(obs, act, rew, logp, val)
+      obs = next_obs
+      ep_step += 1
+      ep_ret += rew
+
+      if done or ep_step == max_ep_len or epoch_step == steps_per_epoch - 1:
+        if done:
+          val = np.float32(val)
+        else:
+          with objmode(obs='float32[:]', val='float32'):
+            _, _, val = AGENT.ac.step(obs)
+            obs = AGENT.env.reset()
+            val = np.float32(val)
+
+        buffer.end_episode(val)
+        total_ep_ret += ep_ret
+        total_eps += 1
+        ep_step = 0
+        ep_ret = 0
+
+    buffer_data = buffer.get()
+    with objmode():
+      AGENT.update(buffer_data)
+      avg_ret = mpi.avg_across_procs(total_ep_ret / total_eps)
+      if mpi.is_root():
+        print('Avg ret:', avg_ret)
+
+      if (epoch + 1) % save_freq == 0 or epoch == epochs - 1:
+        AGENT.save_checkpoint()
+
     total_ep_ret = 0
     total_eps = 0
 
-    while self.epoch < epochs:
-      for epoch_step in range(local_steps_per_epoch):
-        act, logp, val = self.ac.step(obs)
-        next_obs, rew, done, _ = self.env.step(act)
-        self.buffer.add(obs, act, rew, logp, val)
-        obs = next_obs
-        ep_step += 1
-        ep_ret += rew
-
-        if done or ep_step == max_ep_len or epoch_step == local_steps_per_epoch - 1:
-          if done:
-            val = 0
-          else:
-            _, _, val = self.ac.step(obs)
-
-          total_ep_ret += ep_ret
-          total_eps += 1
-          self.buffer.end_episode(val)
-          obs = self.env.reset()
-          ep_step = 0
-          ep_ret = 0
-
-      self.update(v_steps_per_update)
-      avg_ret = mpi.avg_across_procs(total_ep_ret / total_eps)
-      if mpi.is_root():
-        print(f'Avg ret: {avg_ret:.5f}')
-      total_ep_ret = 0
-      total_eps = 0
-
-      self.epoch += 1
-      if self.epoch % save_freq == 0 or self.epoch == epochs:
-        self.save_checkpoint()
-
-  def demo(self, delay_between_episodes=2):
-    env_window.setup_env_window(self.env)
-
-    while True:
-      step = 1
-      done = False
-      total_rew = 0
-      obs = self.env.reset()
-      self.env.render()
-
-      while not done:
-        act, _, _ = self.ac.step(obs)
-        obs, rew, done, _ = self.env.step(act)
-        self.env.render()
-        total_rew += rew
-        logger.log_step(step, obs, act, rew, total_rew)
-        step += 1
-
-      print(f'Episode return: {total_rew}')
-      time.sleep(delay_between_episodes)
+  return obs, next_obs, act, rew, logp, val, done
 
 
 def main():
@@ -349,7 +383,7 @@ def main():
   parser.add_argument('--save_freq', type=int, default=10)
   parser.add_argument('--gam', type=float, default=0.99)
   parser.add_argument('--lam', type=float, default=0.97)
-  parser.add_argument('--v_steps_per_update', type=int, default=80)
+  parser.add_argument('--v_steps_per_pi_step', type=int, default=80)
   parser.add_argument('--pi_lr', type=float, default=.0003)
   parser.add_argument('--v_lr', type=float, default=.001)
   parser.add_argument('--checkpoint_path', type=str, default='vpg_checkpoint.pt')
@@ -357,7 +391,7 @@ def main():
 
   parser.set_defaults(**dict(
       # num_procs=1,
-      # epochs=5,
+      epochs=5,
       # demo=True,
   ))
 
@@ -371,15 +405,20 @@ def main():
     print(f'Number of processes: {mpi.num_procs()}')
 
   env = gym.make(args.env)
-  agent = Agent(env, args.pi_lr, args.v_lr)
+  global AGENT
+  AGENT = Agent(env, args.pi_lr, args.v_lr, args.v_steps_per_pi_step)
+
+  local_steps_per_epoch = args.steps_per_epoch // mpi.num_procs()
 
   if args.demo:
-    agent.load_checkpoint(args.checkpoint_path)
-    agent.demo()
+    AGENT.load_checkpoint(args.checkpoint_path)
+    # demo()
   else:
+    train(1, local_steps_per_epoch, args.max_ep_len,
+          args.save_freq, args.gam, args.lam)
     start_time = time.time()
-    agent.train(args.epochs, args.steps_per_epoch, args.max_ep_len,
-                args.save_freq, args.gam, args.lam, args.v_steps_per_update)
+    train(args.epochs, local_steps_per_epoch, args.max_ep_len,
+          args.save_freq, args.gam, args.lam)
     end_time = time.time()
     print(f'Elapsed time: {end_time - start_time}')
 

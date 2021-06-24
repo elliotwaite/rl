@@ -226,7 +226,7 @@ def main():
       # env='Enduro-v0',
       # env='MontezumaRevenge-v0',
       # env='MsPacman-v0',
-      env='Pong-v0',
+      # env='Pong-v0',
       # env='Qbert-v0',
       # env='Riverraid-v0',
       # env='Seaquest-v0',
@@ -246,6 +246,9 @@ def main():
       # env='MountainCar-v0',
       # env='MountainCarContinuous-v0',
       # env='Pendulum-v0',
+
+      # Other
+      # env='FlappyBird-v0',
   ))
 
   args = parser.parse_args()
